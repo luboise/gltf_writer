@@ -13,50 +13,7 @@ impl Serialize for ValuesList {
     where
         S: Serializer,
     {
-        let mut chunks = self.bytes.chunks_exact(self.value_size());
-
-        if self.len() == 1 {
-            return match self.data_type {
-                AccessorDataType::I8 => {
-                    let byte = chunks.nth(0).expect("Unable to get first byte.")[0] as i8;
-                    serializer.serialize_i8(byte)
-                }
-                AccessorDataType::U8 => {
-                    let byte = chunks.nth(0).expect("Unable to get first byte.")[0];
-                    serializer.serialize_u8(byte)
-                }
-                AccessorDataType::I16 => {
-                    let bytes = (chunks.nth(0).expect("Unable to get chunk."))
-                        .try_into()
-                        .unwrap();
-                    serializer.serialize_i16(i16::from_le_bytes(bytes))
-                }
-                AccessorDataType::U16 => {
-                    let bytes = (chunks.nth(0).expect("Unable to get chunk."))
-                        .try_into()
-                        .unwrap();
-                    serializer.serialize_u16(u16::from_le_bytes(bytes))
-                }
-                AccessorDataType::I32 => {
-                    let bytes = (chunks.nth(0).expect("Unable to get chunk."))
-                        .try_into()
-                        .unwrap();
-                    serializer.serialize_i32(i32::from_le_bytes(bytes))
-                }
-                AccessorDataType::U32 => {
-                    let bytes = (chunks.nth(0).expect("Unable to get chunk."))
-                        .try_into()
-                        .unwrap();
-                    serializer.serialize_u32(u32::from_le_bytes(bytes))
-                }
-                AccessorDataType::F32 => {
-                    let bytes = (chunks.nth(0).expect("Unable to get chunk."))
-                        .try_into()
-                        .unwrap();
-                    serializer.serialize_f32(f32::from_le_bytes(bytes))
-                }
-            };
-        }
+        let chunks = self.bytes.chunks_exact(self.value_size());
 
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
 
