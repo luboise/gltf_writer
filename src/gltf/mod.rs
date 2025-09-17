@@ -1,10 +1,14 @@
 use std::{collections::HashMap, fs};
 
+pub mod values_list;
+
 use serde::{
     Serialize, Serializer,
     ser::{Error, SerializeMap},
 };
 use serde_repr::{Deserialize_repr, Serialize_repr};
+
+use crate::gltf::values_list::ValuesList;
 
 pub type GltfIndex = u32;
 
@@ -64,10 +68,6 @@ impl Buffer {
             data: bytes.as_ref().to_vec(),
             ..Self::default()
         }
-    }
-
-    pub fn data_from_view(&self, view: &BufferView) -> Result<Vec<u8>, GltfError> {
-        todo!();
     }
 }
 
@@ -361,6 +361,10 @@ impl AccessorDataType {
             Self::I32 | Self::U32 | Self::F32 => 32,
         }
     }
+
+    pub fn byte_size(&self) -> u8 {
+        self.bit_size() / 8
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -375,7 +379,7 @@ pub enum AccessorComponentCount {
 }
 
 impl AccessorComponentCount {
-    pub fn component_count(&self) -> GltfIndex {
+    pub fn component_count(&self) -> u32 {
         match self {
             Self::SCALAR => 1,
             Self::VEC2 => 2,
@@ -394,14 +398,20 @@ pub struct Accessor {
     pub buffer_view_index: GltfIndex,
     pub byte_offset: usize,
 
+    /// The number of values this accessor has
+    pub count: usize,
+
+    // The type of each Subvalue
     #[serde(rename = "componentType")]
     pub data_type: AccessorDataType,
 
-    #[serde(rename = "count")]
-    pub data_count: usize,
-
     #[serde(rename = "type")]
     pub component_count: AccessorComponentCount,
+
+    #[serde(rename = "min", skip_serializing_if = "Option::is_none")]
+    min_values: Option<ValuesList>,
+    #[serde(rename = "max", skip_serializing_if = "Option::is_none")]
+    max_values: Option<ValuesList>,
 }
 
 impl Accessor {
@@ -409,16 +419,103 @@ impl Accessor {
         buffer_view_index: GltfIndex,
         byte_offset: usize,
         data_type: AccessorDataType,
-        data_count: usize,
+        count: usize,
         parts_per_data: AccessorComponentCount,
     ) -> Self {
         Self {
             buffer_view_index,
             byte_offset,
             data_type,
-            data_count,
+            count,
             component_count: parts_per_data,
+            min_values: None,
+            max_values: None,
         }
+    }
+
+    pub fn value_size(&self) -> usize {
+        self.data_type.byte_size() as usize * self.component_count.component_count() as usize
+    }
+
+    pub fn get_bytes(&self, gltf: &Gltf) -> Result<Vec<u8>, GltfError> {
+        let val_size = self.value_size();
+
+        let mut bytes = vec![0u8; self.count * val_size];
+
+        let bv = gltf
+            .buffer_views
+            .get(self.buffer_view_index as usize)
+            .ok_or(GltfError::OutOfRange)?;
+        let buffer = gltf
+            .buffers
+            .get(bv.buffer_index as usize)
+            .ok_or(GltfError::OutOfRange)?;
+
+        let stride = bv.byte_stride.unwrap_or(val_size);
+
+        // If the buffer view's stride is smaller than our value size, the slices will be
+        // completely broken
+        if stride < val_size {
+            return Err(GltfError::OutOfRange);
+        }
+
+        for i in 0..self.count {
+            let start = i * stride + bv.byte_offset + self.byte_offset;
+            let end = start + val_size;
+
+            // Read one stride worth of data from the actual buffer
+            bytes[i * val_size..(i + 1) * val_size].copy_from_slice(&buffer.data[start..end]);
+        }
+
+        Ok(bytes)
+    }
+
+    pub fn get_value_chunks(&self, gltf: &Gltf) -> Result<Vec<Vec<u8>>, GltfError> {
+        let bytes = self.get_bytes(gltf)?;
+
+        Ok(bytes
+            .chunks_exact(self.data_type.byte_size() as usize)
+            .map(|v| v.to_vec())
+            .collect())
+    }
+
+    pub fn get_values_f32(&self, gltf: &Gltf) -> Result<Vec<f32>, GltfError> {
+        let chunks = self.get_value_chunks(gltf)?;
+
+        if !chunks.iter().all(|chunk| chunk.len() == size_of::<f32>()) {
+            return Err(GltfError::OutOfRange);
+        }
+
+        Ok(chunks
+            .iter()
+            .map(|chunk| f32::from_le_bytes(chunk.as_slice().try_into().unwrap()))
+            .collect())
+    }
+
+    pub fn get_values_u32(&self, gltf: &Gltf) -> Result<Vec<u32>, GltfError> {
+        let chunks = self.get_value_chunks(gltf)?;
+
+        if !chunks.iter().all(|chunk| chunk.len() == size_of::<u32>()) {
+            return Err(GltfError::OutOfRange);
+        }
+
+        Ok(chunks
+            .iter()
+            .map(|chunk| u32::from_le_bytes(chunk.as_slice().try_into().unwrap()))
+            .collect())
+    }
+
+    pub fn get_values_u16(&self, gltf: &Gltf) -> Result<Vec<u16>, GltfError> {
+        let chunks = self.get_value_chunks(gltf)?;
+
+        if !chunks.iter().all(|chunk| chunk.len() == size_of::<u16>()) {
+            return Err(GltfError::OutOfRange);
+        }
+
+        Ok(chunks
+            .iter()
+            .map(|chunk| u16::from_le_bytes(chunk.as_slice().try_into().unwrap()))
+            .collect())
     }
 }
 
@@ -565,9 +662,132 @@ impl Gltf {
         &mut self.nodes
     }
 
-    pub fn prepare_for_export(&mut self) -> Result<(), String> {
+    pub fn prepare_for_export(&mut self) -> Result<(), GltfError> {
         for (i, buffer) in self.buffers.iter_mut().enumerate() {
             buffer.index = Some(i as GltfIndex);
+        }
+
+        let len = self.accessors.len();
+
+        for i in 0..len {
+            let accessor = self.accessors[i].clone();
+
+            let component_count = accessor.component_count.component_count() as usize;
+
+            match accessor.data_type {
+                AccessorDataType::I8 => todo!(),
+                AccessorDataType::U8 => todo!(),
+                AccessorDataType::I16 => todo!(),
+                AccessorDataType::U16 => {
+                    let vals = accessor.get_values_u16(self)?;
+
+                    let mut mins = vec![u16::MAX; component_count];
+                    let mut maxes = vec![u16::MIN; component_count];
+
+                    vals.chunks_exact(component_count).for_each(|chunk| {
+                        for (i, val_i) in chunk.iter().enumerate() {
+                            if i >= component_count {
+                                break;
+                            }
+
+                            if mins[i] > *val_i {
+                                mins[i] = *val_i;
+                            }
+                            if maxes[i] < *val_i {
+                                maxes[i] = *val_i;
+                            }
+                        }
+                    });
+
+                    self.accessors[i].min_values = Some(ValuesList::new(
+                        mins.iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::U16,
+                    ));
+
+                    self.accessors[i].max_values = Some(ValuesList::new(
+                        maxes
+                            .iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::U16,
+                    ));
+                }
+                AccessorDataType::I32 => todo!(),
+                AccessorDataType::U32 => {
+                    let vals = accessor.get_values_u32(self)?;
+
+                    let mut mins = vec![u32::MAX; component_count];
+                    let mut maxes = vec![u32::MIN; component_count];
+
+                    vals.chunks_exact(component_count).for_each(|chunk| {
+                        for (i, val_i) in chunk.iter().enumerate() {
+                            if i >= component_count {
+                                break;
+                            }
+
+                            if mins[i] > *val_i {
+                                mins[i] = *val_i;
+                            }
+                            if maxes[i] < *val_i {
+                                maxes[i] = *val_i;
+                            }
+                        }
+                    });
+
+                    self.accessors[i].min_values = Some(ValuesList::new(
+                        mins.iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::U32,
+                    ));
+
+                    self.accessors[i].max_values = Some(ValuesList::new(
+                        maxes
+                            .iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::U32,
+                    ));
+                }
+                AccessorDataType::F32 => {
+                    let vals = accessor.get_values_f32(self)?;
+
+                    let mut mins = vec![f32::MAX; component_count];
+                    let mut maxes = vec![f32::MIN; component_count];
+
+                    vals.chunks_exact(component_count).for_each(|chunk| {
+                        for (i, val_i) in chunk.iter().enumerate() {
+                            if i >= component_count {
+                                break;
+                            }
+
+                            if mins[i] > *val_i {
+                                mins[i] = *val_i;
+                            }
+                            if maxes[i] < *val_i {
+                                maxes[i] = *val_i;
+                            }
+                        }
+                    });
+
+                    self.accessors[i].min_values = Some(ValuesList::new(
+                        mins.iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::F32,
+                    ));
+
+                    self.accessors[i].max_values = Some(ValuesList::new(
+                        maxes
+                            .iter()
+                            .flat_map(|val| val.to_le_bytes().to_vec())
+                            .collect(),
+                        AccessorDataType::F32,
+                    ));
+                }
+            }
         }
 
         Ok(())
