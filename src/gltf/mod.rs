@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, io, path::Path};
 
+pub mod serialisation;
 pub mod values_list;
 
 use serde::{
@@ -8,7 +9,10 @@ use serde::{
 };
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::gltf::values_list::ValuesList;
+use crate::gltf::{
+    serialisation::{GltfExportType, GltfSerialJSON},
+    values_list::ValuesList,
+};
 
 pub type GltfIndex = u32;
 
@@ -28,7 +32,28 @@ struct Quaternion<T> {
 #[derive(Debug, Clone)]
 pub enum GltfError {
     OutOfRange,
+    SerialisationError(String),
 }
+
+impl<T: ToString> From<T> for GltfError {
+    fn from(value: T) -> Self {
+        Self::SerialisationError(value.to_string())
+    }
+}
+
+/*
+impl From<io::Error> for GltfError {
+    fn from(value: io::Error) -> Self {
+        Self::SerialisationError(value.to_string())
+    }
+}
+
+impl From<serde_json::Error> for GltfError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::SerialisationError(value.to_string())
+    }
+}
+*/
 
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
@@ -49,8 +74,6 @@ impl Serialize for Buffer {
             let mut map = serializer.serialize_map(None)?;
 
             let filename = format!("{}.bin", index);
-
-            fs::write(&filename, &self.data).map_err(S::Error::custom)?;
             map.serialize_entry("byteLength", &self.data.len())?;
             map.serialize_entry("uri", &filename)?;
             map.end()
@@ -576,25 +599,6 @@ pub struct Gltf {
     asset: Asset,
 }
 
-/*
-impl serde::Serialize for Gltf {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-
-        map.serialize_entry("version", "2.0")?;
-        map.serialize_entry("accessors", &self.accessors)?;
-        map.serialize_entry("buffers", &self.buffers);
-
-        // map.serialize_entry("buffers", &self.buffers)?;
-
-        todo!()
-    }
-}
-*/
-
 impl Gltf {
     pub fn add_buffer(&mut self, buffer: Buffer) -> GltfIndex {
         self.buffers.push(buffer);
@@ -792,43 +796,24 @@ impl Gltf {
 
         Ok(())
     }
-}
 
-/*
-pub(crate) trait GltfValue {
-     fn get_value(&self, gltf: &Gltf, index: u32);
-     fn get_value_mut(&self, gltf:  &mut Gltf, index: u32);
-}
+    pub fn export<P: AsRef<Path>>(
+        &self,
+        export_path: P,
+        export_type: GltfExportType,
+    ) -> Result<(), GltfError> {
+        match export_type {
+            GltfExportType::JSON => {
+                let gltf_bytes = serde_json::to_vec_pretty(self)?;
 
-pub(crate) trait CanGetTheThing<T>{
-    fn get_thing(&self, gltf: &Gltf) -> &[T];
-    fn get_thing_mut(&self, gltf: &mut Gltf) -> &mut [T];
-}
+                let mut json = GltfSerialJSON::new(gltf_bytes);
 
+                for buffer in &self.buffers {
+                    json.add_buffer(buffer.data.clone());
+                }
 
-#[derive(Debug, Clone, Default)]
-pub struct Index<T> where T: CanGetTheThing<T>{
-    index: u32
-}
-
-
-
-impl<T> Index<T> {
-    pub fn value(&self, Gltf)
-}
-
-
-impl<T> for Index<T> {
-
-}
-
-impl<T> GltfValue for Index<T> {
-    fn get_value(&self, gltf: &Gltf) {
-        T::get_value()
-    }
-
-    fn get_value_mut(&self, gltf: &mut Gltf) {
-        todo!()
+                json.export(export_path)
+            }
+        }
     }
 }
-*/
