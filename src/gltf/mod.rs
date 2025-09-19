@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io, path::Path};
+use std::{collections::HashMap, path::PathBuf};
 
 pub mod serialisation;
 pub mod values_list;
@@ -40,20 +40,6 @@ impl<T: ToString> From<T> for GltfError {
         Self::SerialisationError(value.to_string())
     }
 }
-
-/*
-impl From<io::Error> for GltfError {
-    fn from(value: io::Error) -> Self {
-        Self::SerialisationError(value.to_string())
-    }
-}
-
-impl From<serde_json::Error> for GltfError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::SerialisationError(value.to_string())
-    }
-}
-*/
 
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
@@ -305,7 +291,7 @@ where
     let mut map = serializer.serialize_map(None)?;
 
     for (key, value) in attributes {
-        map.serialize_entry(&key.to_string(), &value);
+        map.serialize_entry(&key.to_string(), &value)?;
     }
 
     map.end()
@@ -797,9 +783,9 @@ impl Gltf {
         Ok(())
     }
 
-    pub fn export<P: AsRef<Path>>(
+    pub fn export(
         &self,
-        export_path: P,
+        export_path: &PathBuf,
         export_type: GltfExportType,
     ) -> Result<(), GltfError> {
         match export_type {

@@ -28,50 +28,69 @@ impl GltfSerialJSON {
     }
 
     pub fn export<P: AsRef<Path>>(&self, path: P) -> Result<(), GltfError> {
-        let export_path = path.as_ref();
+        let gltf_path = path.as_ref();
 
         let error_mapper = |e| {
             GltfError::SerialisationError(format!(
                 "Failed to check if path {} exists. {}",
-                export_path.display(),
+                gltf_path.display(),
                 e
             ))
         };
 
-        if fs::exists(export_path).map_err(error_mapper)? {
+        if fs::exists(gltf_path).map_err(error_mapper)? {
             return Err(GltfError::SerialisationError(format!(
                 "Path {} already exists.",
-                export_path.display()
+                gltf_path.display()
             )));
         }
 
-        let file_stem = export_path
+        let export_dir = gltf_path.parent().ok_or(format!(
+            "Unable to get parent from export path {}",
+            gltf_path.display()
+        ))?;
+
+        println!("Export dir: {}", export_dir.display());
+
+        if !export_dir.exists() {
+            println!("  export dir was not found. Creating it.");
+            fs::create_dir_all(export_dir)?;
+        }
+
+        let file_stem = gltf_path
             .file_stem()
             .ok_or(format!(
                 "The specified path {}, did not have a file stem.",
-                export_path.display()
+                gltf_path.display()
             ))?
             .to_str()
             .ok_or("Error converting OsString to regular string.".to_string())?
             .to_string();
 
-        let out_dir = export_path.join(file_stem);
+        println!("File stem: {}", &file_stem);
 
-        if !out_dir.exists() {
-            fs::create_dir(&out_dir)?;
+        fs::write(gltf_path, &self.gltf_bytes)?;
+
+        // TODO: Implement asset dir semantics into the buffers in the gltf bytes
+        /*
+        let asset_dir = export_dir.join(file_stem);
+
+        if !asset_dir.exists() {
+            println!("Creating dir {}", asset_dir.display());
+            fs::create_dir(&asset_dir)?;
         }
         // If its an existing file or non-directory, then we can't write files into it
-        else if !out_dir.is_dir() {
+
+        if !asset_dir.is_dir() {
             return Err(GltfError::SerialisationError(format!(
                 "Out dir {} exists and is not a file. Unable to export to that folder.",
-                out_dir.display()
+                asset_dir.display()
             )));
         }
-
-        fs::write(export_path, &self.gltf_bytes)?;
+        */
 
         for (i, buffer) in self.buffers.iter().enumerate() {
-            let bin_path = out_dir.join(format!("{}.bin", i));
+            let bin_path = export_dir.join(format!("{}.bin", i));
 
             fs::write(bin_path, buffer)?;
         }
