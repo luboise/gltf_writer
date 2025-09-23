@@ -6,6 +6,7 @@ use crate::gltf::GltfError;
 pub struct GltfSerialJSON {
     gltf_bytes: Vec<u8>,
     buffers: Vec<Vec<u8>>,
+    images: Vec<Vec<u8>>,
 }
 
 impl GltfSerialJSON {
@@ -13,18 +14,26 @@ impl GltfSerialJSON {
         Self {
             gltf_bytes,
             buffers: vec![],
+            images: vec![],
         }
     }
 
+    pub fn buffers(&self) -> &[Vec<u8>] {
+        &self.buffers
+    }
     pub fn add_buffer<B: AsRef<[u8]>>(&mut self, bytes: B) {
         self.buffers.push(bytes.as_ref().to_vec())
     }
 
+    pub fn images(&self) -> &[Vec<u8>] {
+        &self.images
+    }
+    pub fn add_image<B: AsRef<[u8]>>(&mut self, bytes: B) {
+        self.images.push(bytes.as_ref().to_vec())
+    }
+
     pub fn gltf_bytes(&self) -> &[u8] {
         &self.gltf_bytes
-    }
-    pub fn buffers(&self) -> &[Vec<u8>] {
-        &self.buffers
     }
 
     pub fn export<P: AsRef<Path>>(&self, path: P) -> Result<(), GltfError> {
@@ -93,6 +102,12 @@ impl GltfSerialJSON {
             let bin_path = export_dir.join(format!("{}.bin", i));
 
             fs::write(bin_path, buffer)?;
+        }
+
+        for (i, image) in self.images.iter().enumerate() {
+            let img_path = export_dir.join(format!("image{}.png", i));
+
+            fs::write(img_path, image)?;
         }
 
         Ok(())

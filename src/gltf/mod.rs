@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fmt::Display, path::PathBuf};
 
 pub mod serialisation;
 pub mod values_list;
@@ -319,6 +319,7 @@ impl Primitive {
 pub struct Mesh {
     name: String,
     primitives: Vec<Primitive>,
+    material: Option<GltfIndex>,
 }
 
 impl Mesh {
@@ -326,6 +327,7 @@ impl Mesh {
         Self {
             name,
             primitives: vec![],
+            material: None,
         }
     }
 
@@ -340,6 +342,13 @@ impl Mesh {
     }
     pub fn primitives_mut(&mut self) -> &mut Vec<Primitive> {
         &mut self.primitives
+    }
+
+    pub fn material(&self) -> Option<GltfIndex> {
+        self.material
+    }
+    pub fn set_material(&mut self, material: Option<GltfIndex>) {
+        self.material = material;
     }
 }
 
@@ -376,7 +385,7 @@ impl AccessorDataType {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum AccessorComponentCount {
     SCALAR,
     VEC2,
@@ -571,6 +580,106 @@ impl Asset {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub enum ImageMimeType {
+    JPEG,
+    PNG,
+}
+
+// TODO: Implement display instead
+impl ToString for ImageMimeType {
+    fn to_string(&self) -> String {
+        (match self {
+            ImageMimeType::JPEG => "image/jpeg",
+            ImageMimeType::PNG => "image/png",
+        })
+        .to_string()
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Image {
+    pub uri: Option<String>,
+
+    pub data: Vec<u8>,
+
+    pub mime_type: Option<ImageMimeType>,
+
+    // TODO: Add embedded image support
+    pub buffer_view_index: Option<GltfIndex>,
+    pub name: String,
+}
+
+impl Serialize for Image {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.data.is_empty() {
+            Err(S::Error::custom(
+                "Unable to serialise a buffer with no data in it.",
+            ))
+        } else if let Some(uri) = &self.uri {
+            let mut map = serializer.serialize_map(None)?;
+
+            map.serialize_entry("byteLength", &self.data.len())?;
+            map.serialize_entry("uri", uri)?;
+
+            map.serialize_entry("name", &self.name)?;
+
+            if let Some(mt) = &self.mime_type {
+                map.serialize_entry("mimeType", &mt.to_string())?;
+            }
+            if let Some(bvi) = &self.buffer_view_index {
+                map.serialize_entry("bufferView", &bvi)?;
+            }
+
+            map.end()
+        } else {
+            Err(S::Error::custom(
+                "Unable to serialise a buffer without an index.",
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Texture {
+    /*
+    #[serde(rename = "sampler")]
+    sampler_index: Option<GltfIndex>,
+    */
+    #[serde(rename = "source")]
+    pub image_index: Option<GltfIndex>,
+
+    pub name: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct TextureInfo {
+    #[serde(rename = "index")]
+    pub texture_index: GltfIndex,
+
+    #[serde(rename = "texCoord")]
+    pub texcoords_accessor: Option<GltfIndex>,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct PBRMetallicRoughness {
+    #[serde(rename = "baseColorTexture")]
+    base_color_texture: Option<TextureInfo>,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Material {
+    pub name: String,
+    pub pbr_metallic_roughness: Option<PBRMetallicRoughness>,
+    /* TODO: Implement
+    #[serde(rename = "normalTexture")]
+    normal_texture: NormalTextureInfo
+    */
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gltf {
@@ -580,8 +689,13 @@ pub struct Gltf {
     buffers: Vec<Buffer>,
     scenes: Vec<Scene>,
     meshes: Vec<Mesh>,
+    materials: Vec<Material>,
+    textures: Vec<Texture>,
+    images: Vec<Image>,
     nodes: Vec<Node>,
 
+    // textures: Vec<Texture>,
+    // images: Vec<Image>,
     asset: Asset,
 }
 
@@ -652,6 +766,39 @@ impl Gltf {
         &mut self.nodes
     }
 
+    pub fn add_material(&mut self, material: Material) -> GltfIndex {
+        self.materials.push(material);
+        (self.materials.len() - 1) as GltfIndex
+    }
+    pub fn materials(&self) -> &[Material] {
+        &self.materials
+    }
+    pub fn materials_mut(&mut self) -> &mut Vec<Material> {
+        &mut self.materials
+    }
+
+    pub fn add_texture(&mut self, texture: Texture) -> GltfIndex {
+        self.textures.push(texture);
+        (self.textures.len() - 1) as GltfIndex
+    }
+    pub fn textures(&self) -> &[Texture] {
+        &self.textures
+    }
+    pub fn textures_mut(&mut self) -> &mut Vec<Texture> {
+        &mut self.textures
+    }
+
+    pub fn add_image(&mut self, image: Image) -> GltfIndex {
+        self.images.push(image);
+        (self.images.len() - 1) as GltfIndex
+    }
+    pub fn images(&self) -> &[Image] {
+        &self.images
+    }
+    pub fn images_mut(&mut self) -> &mut Vec<Image> {
+        &mut self.images
+    }
+
     pub fn prepare_for_export(&mut self) -> Result<(), GltfError> {
         for (i, buffer) in self.buffers.iter_mut().enumerate() {
             buffer.index = Some(i as GltfIndex);
@@ -661,6 +808,10 @@ impl Gltf {
 
         for i in 0..len {
             let accessor = self.accessors[i].clone();
+
+            if accessor.component_count == AccessorComponentCount::VEC2 {
+                continue;
+            }
 
             let component_count = accessor.component_count.component_count() as usize;
 
@@ -796,6 +947,10 @@ impl Gltf {
 
                 for buffer in &self.buffers {
                     json.add_buffer(buffer.data.clone());
+                }
+
+                for image in &self.images {
+                    json.add_image(image.data.clone());
                 }
 
                 json.export(export_path)
