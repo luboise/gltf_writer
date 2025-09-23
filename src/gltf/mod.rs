@@ -319,6 +319,8 @@ impl Primitive {
 pub struct Mesh {
     name: String,
     primitives: Vec<Primitive>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     material: Option<GltfIndex>,
 }
 
@@ -667,12 +669,17 @@ pub struct TextureInfo {
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct PBRMetallicRoughness {
     #[serde(rename = "baseColorTexture")]
-    base_color_texture: Option<TextureInfo>,
+    pub base_color_texture: Option<TextureInfo>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Material {
     pub name: String,
+
+    #[serde(
+        rename = "pbrMetallicRoughness",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pbr_metallic_roughness: Option<PBRMetallicRoughness>,
     /* TODO: Implement
     #[serde(rename = "normalTexture")]
