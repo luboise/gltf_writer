@@ -231,6 +231,16 @@ impl Scene {
             root_nodes: vec![],
         }
     }
+
+    pub fn add_node(&mut self, node_index: GltfIndex) {
+        self.root_nodes.push(node_index)
+    }
+    pub fn root_nodes(&self) -> &[u32] {
+        &self.root_nodes
+    }
+    pub fn root_nodes_mut(&mut self) -> &mut Vec<GltfIndex> {
+        &mut self.root_nodes
+    }
 }
 
 #[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
