@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 pub mod serialisation;
 pub mod values_list;
@@ -636,7 +636,6 @@ impl Serialize for Image {
         } else if let Some(uri) = &self.uri {
             let mut map = serializer.serialize_map(None)?;
 
-            map.serialize_entry("byteLength", &self.data.len())?;
             map.serialize_entry("uri", uri)?;
 
             map.serialize_entry("name", &self.name)?;
@@ -674,17 +673,22 @@ pub struct TextureInfo {
     #[serde(rename = "index")]
     pub texture_index: GltfIndex,
 
-    #[serde(rename = "texCoord")]
+    #[serde(rename = "texCoord", skip_serializing_if = "Option::is_none")]
     pub texcoords_accessor: Option<GltfIndex>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PBRMetallicRoughness {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_color_factor: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_color_texture: Option<TextureInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metallic_factor: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub roughness_factor: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metallic_roughness_texture: Option<TextureInfo>,
 }
 
