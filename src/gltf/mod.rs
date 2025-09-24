@@ -317,11 +317,24 @@ pub struct Primitive {
     // Attributes
     #[serde(serialize_with = "serialize_attributes")]
     pub attributes: HashMap<VertexAttribute, GltfIndex>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material: Option<GltfIndex>,
 }
 
 impl Primitive {
     pub fn set_attribute(&mut self, attribute: VertexAttribute, value: GltfIndex) {
         self.attributes.insert(attribute, value);
+    }
+    pub fn attributes(&self) -> &HashMap<VertexAttribute, GltfIndex> {
+        &self.attributes
+    }
+
+    pub fn material(&self) -> Option<GltfIndex> {
+        self.material
+    }
+    pub fn set_material(&mut self, material: Option<GltfIndex>) {
+        self.material = material;
     }
 }
 
@@ -329,9 +342,6 @@ impl Primitive {
 pub struct Mesh {
     name: String,
     primitives: Vec<Primitive>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    material: Option<GltfIndex>,
 }
 
 impl Mesh {
@@ -339,7 +349,6 @@ impl Mesh {
         Self {
             name,
             primitives: vec![],
-            material: None,
         }
     }
 
@@ -354,13 +363,6 @@ impl Mesh {
     }
     pub fn primitives_mut(&mut self) -> &mut Vec<Primitive> {
         &mut self.primitives
-    }
-
-    pub fn material(&self) -> Option<GltfIndex> {
-        self.material
-    }
-    pub fn set_material(&mut self, material: Option<GltfIndex>) {
-        self.material = material;
     }
 }
 
@@ -677,9 +679,13 @@ pub struct TextureInfo {
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PBRMetallicRoughness {
-    #[serde(rename = "baseColorTexture")]
+    pub base_color_factor: Option<[f32; 4]>,
     pub base_color_texture: Option<TextureInfo>,
+    pub metallic_factor: Option<f32>,
+    pub roughness_factor: Option<f32>,
+    pub metallic_roughness_texture: Option<TextureInfo>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
