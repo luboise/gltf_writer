@@ -1,15 +1,19 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fmt, path::PathBuf};
 
 pub mod serialisation;
 pub mod values_list;
 
+pub mod animation;
+
 use serde::{
     Serialize, Serializer,
+    de::{self, MapAccess, Visitor},
     ser::{Error, SerializeMap},
 };
-use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde_repr::Serialize_repr;
 
 use crate::gltf::{
+    animation::Animation,
     serialisation::{GltfExportType, GltfSerialJSON},
     values_list::ValuesList,
 };
@@ -46,6 +50,18 @@ pub struct Buffer {
     data: Vec<u8>,
     pub(crate) index: Option<GltfIndex>,
 }
+
+/*
+impl<'de> Deserialize<'de> for Buffer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // deserializer.deserialize_;
+        Err(de::Error::custom(todo!()))
+    }
+}
+*/
 
 impl Serialize for Buffer {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -114,11 +130,77 @@ impl BufferView {
 }
 
 #[derive(Debug, Clone)]
-
 pub enum NodeTransform {
     Precomputed(Mat4<f32>),
     TRS(Vec3<f32>, Vec3<f32>, Vec3<f32>),
 }
+
+struct NodeTransformVisitor;
+
+impl<'de> Visitor<'de> for NodeTransformVisitor {
+    type Value = NodeTransform;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("Expecting bytes to make up a transform.")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<NodeTransform, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut using_matrix: Option<bool> = None;
+
+        let mut translation: Option<Vec3<f32>> = None;
+        let mut rotation: Option<Vec3<f32>> = None;
+        let mut scale: Option<Vec3<f32>> = None;
+
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "matrix" {
+                if let Some(using) = using_matrix {
+                    if !using {
+                        return Err(de::Error::custom(
+                            "Matrix and translation/rotation/scale both encountered in gltf file.",
+                        ));
+                    }
+                }
+
+                return Ok(NodeTransform::Precomputed(map.next_value()?));
+            } else if key == "translation" {
+                translation = Some(map.next_value()?);
+                using_matrix = Some(false);
+            } else if key == "rotation" {
+                rotation = Some(map.next_value()?);
+                using_matrix = Some(false);
+            } else if key == "scale" {
+                scale = Some(map.next_value()?);
+                using_matrix = Some(false);
+            }
+        }
+
+        if translation.is_none() || rotation.is_none() || scale.is_none() {
+            return Err(de::Error::missing_field(
+                "Missing matrix field, or combined translation, rotation and scale fields.",
+            ));
+        }
+
+        Ok(NodeTransform::TRS(
+            translation.unwrap(),
+            rotation.unwrap(),
+            scale.unwrap(),
+        ))
+    }
+}
+
+/*
+impl<'de> Deserialize<'de> for NodeTransform {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(NodeTransformVisitor)
+    }
+}
+*/
 
 impl Serialize for NodeTransform {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -130,8 +212,24 @@ impl Serialize for NodeTransform {
         match self {
             NodeTransform::Precomputed(pc) => map.serialize_entry("matrix", &pc)?,
             NodeTransform::TRS(translation, rotation, scale) => {
+                let [roll, pitch, yaw] = *rotation;
+
+                let cr = (roll * 0.5).cos();
+                let sr = (roll * 0.5).sin();
+                let cp = (pitch * 0.5).cos();
+                let sp = (pitch * 0.5).sin();
+                let cy = (yaw * 0.5).cos();
+                let sy = (yaw * 0.5).sin();
+
+                let w: f32 = cr * cp * cy + sr * sp * sy;
+                let x: f32 = sr * cp * cy - cr * sp * sy;
+                let y: f32 = cr * sp * cy + sr * cp * sy;
+                let z: f32 = cr * cp * sy - sr * sp * cy;
+
+                let quaternion = [x, y, z, w];
+
                 map.serialize_entry("translation", &translation)?;
-                map.serialize_entry("rotation", &rotation)?;
+                map.serialize_entry("rotation", &quaternion)?;
                 map.serialize_entry("scale", &scale)?;
             }
         };
@@ -140,7 +238,7 @@ impl Serialize for NodeTransform {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Node {
     name: Option<String>,
 
@@ -243,7 +341,7 @@ impl Scene {
     }
 }
 
-#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Serialize_repr)]
 #[repr(u32)]
 pub enum TopologyMode {
     Points = 0,
@@ -265,6 +363,58 @@ pub enum VertexAttribute {
     Joints(GltfIndex),
     Weights(GltfIndex),
     User(String),
+}
+
+impl TryFrom<String> for VertexAttribute {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            "POSITION" => {
+                return Ok(Self::Position);
+            }
+            "NORMAL" => {
+                return Ok(Self::Normal);
+            }
+            "TANGENT" => {
+                return Ok(Self::Tangent);
+            }
+            _ => (),
+        };
+
+        let get_len = |string: &str, substr: &str| -> Result<Option<GltfIndex>, String> {
+            if string.starts_with(substr) {
+                let len = substr.len();
+                if value.len() <= len {
+                    return Err(format!("Bad length for texcoord: {}", &len));
+                }
+
+                return Ok(Some(
+                    GltfIndex::from_str_radix(&value[len..], 10).map_err(|e| e.to_string())?,
+                ));
+            }
+
+            Ok(None)
+        };
+
+        if let Some(index) = get_len(&value, "TEXCOORD_")? {
+            return Ok(Self::TexCoord(index));
+        }
+
+        if let Some(index) = get_len(&value, "COLOR_")? {
+            return Ok(Self::Colour(index));
+        }
+
+        if let Some(index) = get_len(&value, "JOINTS_")? {
+            return Ok(Self::Joints(index));
+        }
+
+        if let Some(index) = get_len(&value, "WEIGHTS_")? {
+            return Ok(Self::Weights(index));
+        }
+
+        Ok(Self::User(value))
+    }
 }
 
 impl ToString for VertexAttribute {
@@ -291,6 +441,32 @@ impl Serialize for VertexAttribute {
     }
 }
 
+struct VertexAttributeVisitor;
+
+/*
+
+impl<'de> Visitor<'de> for VertexAttributeVisitor {
+    type Value = VertexAttribute;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("Expecting bytes to make up a transform.")
+    }
+
+    fn visit_str(self, v: &str) -> Result<Self::Value, String> {
+        Ok(v.try_into().map_err(|e| e.to_string())?)
+    }
+}
+
+impl<'de> Deserialize<'de> for VertexAttribute {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(VertexAttributeVisitor)
+    }
+}
+*/
+
 fn serialize_attributes<S>(
     attributes: &HashMap<VertexAttribute, GltfIndex>,
     serializer: S,
@@ -315,7 +491,12 @@ pub struct Primitive {
     pub topology_type: Option<TopologyMode>,
 
     // Attributes
-    #[serde(serialize_with = "serialize_attributes")]
+    /*
+    #[serde(
+        serialize_with = "serialize_attributes",
+        deserialize_with = "deserialize_attributes"
+    )]
+    */
     pub attributes: HashMap<VertexAttribute, GltfIndex>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -366,7 +547,7 @@ impl Mesh {
     }
 }
 
-#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Serialize_repr)]
 #[repr(usize)]
 pub enum AccessorDataType {
     I8 = 5120,
@@ -624,6 +805,14 @@ pub struct Image {
     pub name: String,
 }
 
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Skin {
+    pub joints: Vec<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inverse_bind_matrices: Option<GltfIndex>,
+}
+
 impl Serialize for Image {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -712,6 +901,8 @@ pub struct Material {
 pub struct Gltf {
     accessors: Vec<Accessor>,
 
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    animations: Vec<Animation>,
     buffer_views: Vec<BufferView>,
     buffers: Vec<Buffer>,
     scenes: Vec<Scene>,
@@ -719,6 +910,7 @@ pub struct Gltf {
     materials: Vec<Material>,
     textures: Vec<Texture>,
     images: Vec<Image>,
+    skins: Vec<Skin>,
     nodes: Vec<Node>,
 
     // textures: Vec<Texture>,
@@ -736,6 +928,17 @@ impl Gltf {
     }
     pub fn buffers_mut(&mut self) -> &mut Vec<Buffer> {
         &mut self.buffers
+    }
+
+    pub fn add_animation(&mut self, animation: Animation) -> GltfIndex {
+        self.animations.push(animation);
+        (self.animations.len() - 1) as GltfIndex
+    }
+    pub fn animations(&self) -> &[Animation] {
+        &self.animations
+    }
+    pub fn animations_mut(&mut self) -> &mut Vec<Animation> {
+        &mut self.animations
     }
 
     pub fn add_buffer_view(&mut self, bv: BufferView) -> GltfIndex {
@@ -824,6 +1027,17 @@ impl Gltf {
     }
     pub fn images_mut(&mut self) -> &mut Vec<Image> {
         &mut self.images
+    }
+
+    pub fn add_skin(&mut self, skin: Skin) -> GltfIndex {
+        self.skins.push(skin);
+        (self.skins.len() - 1) as GltfIndex
+    }
+    pub fn skins(&self) -> &[Skin] {
+        &self.skins
+    }
+    pub fn skins_mut(&mut self) -> &mut Vec<Skin> {
+        &mut self.skins
     }
 
     pub fn prepare_for_export(&mut self) -> Result<(), GltfError> {
@@ -960,6 +1174,14 @@ impl Gltf {
 
         Ok(())
     }
+
+    /*
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, GltfError> {
+        let gltf_bytes = fs::read(path)?;
+
+        let gltf: Gltf = serde_json::from_slice(&gltf_bytes)?;
+    }
+    */
 
     pub fn export(
         &self,
