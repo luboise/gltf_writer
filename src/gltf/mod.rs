@@ -13,7 +13,7 @@ use serde::{
 use serde_repr::Serialize_repr;
 
 use crate::gltf::{
-    animation::Animation,
+    animation::{Animation, Sampler},
     serialisation::{GltfExportType, GltfSerialJSON},
     values_list::ValuesList,
 };
@@ -214,19 +214,23 @@ impl Serialize for NodeTransform {
             NodeTransform::TRS(translation, rotation, scale) => {
                 let [roll, pitch, yaw] = *rotation;
 
-                let cr = (roll * 0.5).cos();
-                let sr = (roll * 0.5).sin();
-                let cp = (pitch * 0.5).cos();
-                let sp = (pitch * 0.5).sin();
-                let cy = (yaw * 0.5).cos();
-                let sy = (yaw * 0.5).sin();
+                let quaternion = if roll == 0.0 && pitch == 0.0 && yaw == 0.0 {
+                    [0.0, 0.0, 0.0, 1.0]
+                } else {
+                    let cr = (roll * 0.5).cos();
+                    let sr = (roll * 0.5).sin();
+                    let cp = (pitch * 0.5).cos();
+                    let sp = (pitch * 0.5).sin();
+                    let cy = (yaw * 0.5).cos();
+                    let sy = (yaw * 0.5).sin();
 
-                let w: f32 = cr * cp * cy + sr * sp * sy;
-                let x: f32 = sr * cp * cy - cr * sp * sy;
-                let y: f32 = cr * sp * cy + sr * cp * sy;
-                let z: f32 = cr * cp * sy - sr * sp * cy;
+                    let w: f32 = cr * cp * cy + sr * sp * sy;
+                    let x: f32 = sr * cp * cy - cr * sp * sy;
+                    let y: f32 = cr * sp * cy + sr * cp * sy;
+                    let z: f32 = cr * cp * sy - sr * sp * cy;
 
-                let quaternion = [x, y, z, w];
+                    [x, y, z, w]
+                };
 
                 map.serialize_entry("translation", &translation)?;
                 map.serialize_entry("rotation", &quaternion)?;
