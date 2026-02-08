@@ -916,6 +916,9 @@ pub struct Gltf {
     // textures: Vec<Texture>,
     // images: Vec<Image>,
     asset: Asset,
+
+    #[serde(rename = "scene", skip_serializing_if = "Option::is_none")]
+    default_scene: Option<GltfIndex>,
 }
 
 impl Gltf {
@@ -1041,6 +1044,10 @@ impl Gltf {
     }
 
     pub fn prepare_for_export(&mut self) -> Result<(), GltfError> {
+        if self.scenes.len() == 1 {
+            self.default_scene = Some(0);
+        }
+
         for (i, buffer) in self.buffers.iter_mut().enumerate() {
             buffer.index = Some(i as GltfIndex);
         }
@@ -1205,5 +1212,13 @@ impl Gltf {
                 json.export(export_path)
             }
         }
+    }
+
+    pub fn default_scene(&self) -> Option<u32> {
+        self.default_scene
+    }
+
+    pub fn set_default_scene(&mut self, default_scene: Option<GltfIndex>) {
+        self.default_scene = default_scene;
     }
 }
