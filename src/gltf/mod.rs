@@ -26,11 +26,78 @@ type Vec4<T> = [T; 4];
 type Mat4<T> = [T; 16];
 
 #[derive(Debug, Clone)]
-struct Quaternion<T> {
-    x: T,
-    y: T,
-    z: T,
-    w: T,
+pub struct Quaternion {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+impl Quaternion {
+    const UNIT: Quaternion = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 1.0,
+    };
+
+    pub fn from_eulers(x: Option<f32>, y: Option<f32>, z: Option<f32>) -> Self {
+        let (sx, cx) = (x.unwrap_or(0.0) * 0.5).sin_cos();
+        let (sy, cy) = (y.unwrap_or(0.0) * 0.5).sin_cos();
+        let (sz, cz) = (z.unwrap_or(0.0) * 0.5).sin_cos();
+
+        Self {
+            x: sx * cy * cz + cx * sy * sz,
+            y: cx * sy * cz - sx * cy * sz,
+            z: cx * cy * sz + sx * sy * cz,
+            w: cx * cy * cz - sx * sy * sz,
+        }
+    }
+
+    pub fn magnitude(&self) -> f32 {
+        (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt()
+    }
+
+    pub fn normalized(&self) -> Self {
+        match self.magnitude() {
+            0.0 => Self::UNIT,
+            m => self.clone() / m,
+        }
+    }
+
+    pub fn to_array(&self) -> [f32; 4] {
+        [self.x, self.y, self.z, self.w]
+    }
+
+    pub fn dot(&self, other: &Self) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w
+    }
+}
+
+impl std::ops::Div<f32> for Quaternion {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        Self {
+            x: self.x / rhs,
+            y: self.y / rhs,
+            z: self.z / rhs,
+            w: self.w / rhs,
+        }
+    }
+}
+
+impl std::ops::Neg for Quaternion {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+            w: -self.w,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
