@@ -94,9 +94,9 @@ impl Target {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Animation {
-    channels: Vec<Channel>,
-    samplers: Vec<Sampler>,
-    name: String,
+    pub channels: Vec<Channel>,
+    pub samplers: Vec<Sampler>,
+    pub name: String,
 }
 
 impl Animation {

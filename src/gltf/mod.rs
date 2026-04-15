@@ -311,24 +311,24 @@ impl Serialize for NodeTransform {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Node {
-    name: Option<String>,
+    pub name: Option<String>,
 
     // Child node indices
     #[serde(rename = "children", skip_serializing_if = "Vec::is_empty")]
-    child_indices: Vec<GltfIndex>,
+    pub child_indices: Vec<GltfIndex>,
 
     // Accessors
     #[serde(rename = "camera", skip_serializing_if = "Option::is_none")]
-    camera_index: Option<GltfIndex>,
+    pub camera_index: Option<GltfIndex>,
 
     #[serde(rename = "mesh", skip_serializing_if = "Option::is_none")]
-    mesh_index: Option<GltfIndex>,
+    pub mesh_index: Option<GltfIndex>,
 
     #[serde(rename = "skin", skip_serializing_if = "Option::is_none")]
-    skin_index: Option<GltfIndex>,
+    pub skin_index: Option<GltfIndex>,
 
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    transform: Option<NodeTransform>,
+    pub transform: Option<NodeTransform>,
 }
 
 impl Node {
@@ -387,10 +387,10 @@ impl Node {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Scene {
-    name: String,
+    pub name: String,
 
     #[serde(rename = "nodes")]
-    root_nodes: Vec<GltfIndex>,
+    pub root_nodes: Vec<GltfIndex>,
 }
 
 impl Scene {
@@ -592,8 +592,8 @@ impl Primitive {
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Mesh {
-    name: String,
-    primitives: Vec<Primitive>,
+    pub name: String,
+    pub primitives: Vec<Primitive>,
 }
 
 impl Mesh {
@@ -805,12 +805,12 @@ impl Accessor {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Asset {
-    version: String,
+    pub version: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    copyright: Option<String>,
+    pub copyright: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    generator: Option<String>,
+    pub generator: Option<String>,
 }
 
 impl Default for Asset {
