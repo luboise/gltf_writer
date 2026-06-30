@@ -1,9 +1,9 @@
-use crate::gltf::AccessorDataType;
+use crate::AccessorDataType;
 
 use serde::{Serialize, Serializer, ser::SerializeSeq};
 
 #[derive(Debug, Clone)]
-pub(crate) struct ValuesList {
+pub struct ValuesList {
     bytes: Vec<u8>,
     data_type: AccessorDataType,
 }
@@ -90,5 +90,10 @@ impl ValuesList {
 
     pub fn len(&self) -> usize {
         self.bytes.len() / self.value_size()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }

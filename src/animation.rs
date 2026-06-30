@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::gltf::GltfIndex;
+use crate::GltfIndex;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

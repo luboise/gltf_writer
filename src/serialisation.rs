@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use crate::gltf::GltfError;
+use crate::GltfError;
 
 #[derive(Debug, Clone)]
 pub struct GltfSerialJSON {
