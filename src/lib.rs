@@ -827,6 +827,7 @@ pub struct Image {
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Skin {
     pub joints: Vec<u32>,
 
